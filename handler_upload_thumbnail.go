@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"io"
 	"path/filepath"
+	"crypto/rand"
+	"encoding/base64"
 	"strings"
 	"os"
 	"mime"
@@ -72,7 +74,21 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	mediaTypeParts := strings.Split(mediaType, "/")
 	// parts = ["image", "png"]
 
-	filename := fmt.Sprintf("%s.%s", videoID.String(), mediaTypeParts[1])
+	// Make a 32-byte slice
+	randomBytes := make([]byte, 32)
+
+	// Fill with random data
+	_, err = rand.Read(randomBytes)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't generate random bytes", err)
+    return
+	}
+
+	// Encode to base64 string
+	randomString := base64.RawURLEncoding.EncodeToString(randomBytes)
+
+	// Create filename with extension
+	filename := fmt.Sprintf("%s.%s", randomString, mediaTypeParts[1])
 
 	fullPath := filepath.Join(cfg.assetsRoot, filename)
 
