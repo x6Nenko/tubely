@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"io"
-	"encoding/base64"
+	"path/filepath"
+	"strings"
+	"os"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -41,12 +43,12 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
     return
 	}
 
-	file, fileHeader, err := r.FormFile("thumbnail")
+	uploadedFile, fileHeader, err := r.FormFile("thumbnail")
 	if err != nil {
     respondWithError(w, http.StatusBadRequest, "Couldn't get data", err)
     return
 	}
-	defer file.Close()
+	defer uploadedFile.Close()
 
 	mediaType := fileHeader.Header.Get("Content-Type")
 	if mediaType == "" {
@@ -54,7 +56,22 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
     return
 	}
 
-	imageData, err := io.ReadAll(file)
+	// From the strings package - splitting by delimiter
+	mediaTypeParts := strings.Split(mediaType, "/")
+	// parts = ["image", "png"]
+
+	filename := fmt.Sprintf("%s.%s", videoID.String(), mediaTypeParts[1])
+
+	fullPath := filepath.Join(cfg.assetsRoot, filename)
+
+	diskFile, err := os.Create(fullPath)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't create file", nil)
+    return
+	}
+	defer diskFile.Close()
+
+	_, err = io.Copy(diskFile, uploadedFile)
 	if err != nil {
     respondWithError(w, http.StatusInternalServerError, "Couldn't get data", err)
     return
@@ -71,10 +88,9 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
     return
 	}
 
-	base64Encoded := base64.StdEncoding.EncodeToString(imageData)
-	base64DataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Encoded)
-	metadata.ThumbnailURL = &base64DataURL
-	
+	url := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, filename)
+	metadata.ThumbnailURL = &url
+
 	err = cfg.db.UpdateVideo(metadata)
 	if err != nil {
     respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
