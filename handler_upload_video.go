@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"crypto/rand"
 	"net/http"
 	"context"
 	"mime"
 	"fmt"
 	"os"
+	"os/exec"
 	"io"
 
 	"github.com/google/uuid"
@@ -102,8 +105,14 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusBadRequest, "Couldn't generate random bytes struct", err)
 		return
 	}
+
+	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't get aspect ratio", err)
+		return
+	}
 	randomName := base64.RawURLEncoding.EncodeToString(randomBytes)
-	fileKey := fmt.Sprintf("%s.mp4", randomName)
+	fileKey := fmt.Sprintf("%s/%s.mp4", aspectRatio, randomName)
 
 	// Upload to S3
 	_, err = cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
@@ -129,3 +138,51 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	respondWithJSON(w, http.StatusOK, metadata)
 }
   
+func getVideoAspectRatio(filePath string) (string, error) {
+	// Create a buffer
+	var buffer bytes.Buffer
+
+	// Create a command
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+
+	// capture output by setting where it should write to
+	cmd.Stdout = &buffer
+
+	// Run it
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	bytesData := buffer.Bytes()  // returns []byte
+
+	type stream struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+
+	type ffprobe struct {
+    Streams []stream `json:"streams"`
+	}
+
+	var data ffprobe
+	err = json.Unmarshal(bytesData, &data)
+	if err != nil {
+		return "", err
+	}
+
+	firstStream := data.Streams[0]
+
+	ratio := float64(firstStream.Width) / float64(firstStream.Height)
+	targetRatio169 := 16.0 / 9.0
+	targetRatio916 := 9.0 / 16.0
+	tolerance := 0.1
+
+	if ratio >= targetRatio169 - tolerance && ratio <= targetRatio169 + tolerance {
+		return "landscape", nil // 16:9
+	} else if ratio >= targetRatio916 - tolerance && ratio <= targetRatio916 + tolerance {
+    return "portrait", nil // 9:16
+	} else {
+		return "other", nil
+	}
+}
