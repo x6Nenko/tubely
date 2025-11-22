@@ -95,7 +95,14 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, video)
+	// Convert to signed video before responding
+	signedVideo, err := cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Couldn't convert to signed video before responding", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, signedVideo)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -116,5 +123,21 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, videos)
+	// Create empty slice for signed videos
+	signedVideos := []database.Video{}
+
+	// Loop through each video
+	for video := range videos {
+		// Convert current video
+		signedVideo, err := cfg.dbVideoToSignedVideo(videos[video])
+		if err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Couldn't convert video", err)
+			return
+		}
+		
+		// Add to signed videos slice
+		signedVideos = append(signedVideos, signedVideo)
+	}
+
+	respondWithJSON(w, http.StatusOK, signedVideos)
 }
